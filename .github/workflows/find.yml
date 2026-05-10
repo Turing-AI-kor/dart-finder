@@ -2,40 +2,128 @@ name: DART Finder
 
 on:
   workflow_dispatch:
+    inputs:
+      sample_size:
+        description: '0이면 전체, 테스트는 100~1000 권장'
+        required: false
+        default: '5000'
+      top:
+        description: '저장할 최대 후보 수'
+        required: false
+        default: '5000'
+      min_score:
+        description: '최소 점수'
+        required: false
+        default: '25'
+      include_unlisted:
+        description: '비상장 포함 여부'
+        required: false
+        type: boolean
+        default: true
   schedule:
     - cron: '0 18 * * 0'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: dart-finder-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   find:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: 의존성 설치
-        run: pip install -r requirements.txt
+      - name: Validate repository layout
+        run: |
+          test -f requirements.txt || { echo 'requirements.txt 없음. repo root에 올려야 함'; exit 1; }
+          test -f src/main.py || { echo 'src/main.py 없음. repo root에 src 폴더가 있어야 함'; exit 1; }
+          test -f .github/workflows/find.yml || { echo '.github/workflows/find.yml 없음'; exit 1; }
 
-      - name: DART 타겟 발굴
+      - name: Validate secrets
         env:
           OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
         run: |
+          if [ -z "$OPENDART_API_KEY" ]; then
+            echo 'OPENDART_API_KEY secret이 없습니다. GitHub Settings > Secrets and variables > Actions에 추가하세요.'
+            exit 1
+          fi
+          if [ "${#OPENDART_API_KEY}" -ne 40 ]; then
+            echo "OPENDART_API_KEY 길이가 이상합니다: ${#OPENDART_API_KEY}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore checkpoint cache
+        uses: actions/cache@v4
+        with:
+          path: checkpoint
+          key: dart-checkpoint-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            dart-checkpoint-${{ github.ref_name }}-
+            dart-checkpoint-
+
+      - name: Smoke test CLI
+        env:
+          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+        run: |
+          python -m src.main --help
+          python -m src.main check-key
+
+      - name: DART target finding
+        env:
+          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+        run: |
+          INCLUDE_FLAG="--include-unlisted"
+          if [ "${{ github.event.inputs.include_unlisted || 'true' }}" = "false" ]; then
+            INCLUDE_FLAG="--no-include-unlisted"
+          fi
+
           python -m src.main find \
             --revenue-min 10000000000 \
             --revenue-max 500000000000 \
             --employees-min 30 \
             --employees-max 800 \
-            --top 5000 \
-            --include-unlisted \
-            --min-score 25
+            --top "${{ github.event.inputs.top || '5000' }}" \
+            --sample-size "${{ github.event.inputs.sample_size || '5000' }}" \
+            $INCLUDE_FLAG \
+            --min-score "${{ github.event.inputs.min_score || '25' }}" \
+            --concurrency 10
 
-      - name: 결과 저장
+      - name: List outputs
+        if: always()
+        run: |
+          echo 'output:'
+          find output -type f -maxdepth 2 -print -exec ls -lh {} \; 2>/dev/null || true
+          echo 'checkpoint:'
+          find checkpoint -type f -maxdepth 2 -print -exec ls -lh {} \; 2>/dev/null || true
+
+      - name: Upload results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: targets-${{ github.run_number }}
-          path: output/*.csv
+          path: |
+            output/*.csv
+            checkpoint/*.json
+          if-no-files-found: warn
           retention-days: 90
