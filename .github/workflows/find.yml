@@ -2,8 +2,11 @@ name: DART Finder
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 18 * * 0'
+    inputs:
+      opendart_api_key:
+        description: 'OpenDART API Key 40자리'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -38,18 +41,23 @@ jobs:
           test -f src/scoring.py || { echo 'src/scoring.py 없음'; exit 1; }
           test -f .github/workflows/find.yml || { echo '.github/workflows/find.yml 없음'; exit 1; }
 
-      - name: Validate secrets
+      - name: Prepare OpenDART key
         env:
-          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+          OPENDART_API_KEY_INPUT: ${{ github.event.inputs.opendart_api_key }}
         run: |
-          if [ -z "$OPENDART_API_KEY" ]; then
-            echo 'OPENDART_API_KEY secret이 없습니다. GitHub Settings > Secrets and variables > Actions에 추가하세요.'
+          echo "::add-mask::$OPENDART_API_KEY_INPUT"
+
+          if [ -z "$OPENDART_API_KEY_INPUT" ]; then
+            echo 'OpenDART API Key가 입력되지 않았습니다.'
             exit 1
           fi
-          if [ "${#OPENDART_API_KEY}" -ne 40 ]; then
-            echo "OPENDART_API_KEY 길이가 이상합니다: ${#OPENDART_API_KEY}"
+
+          if [ "${#OPENDART_API_KEY_INPUT}" -ne 40 ]; then
+            echo "OpenDART API Key 길이가 이상합니다: ${#OPENDART_API_KEY_INPUT}"
             exit 1
           fi
+
+          echo "OPENDART_API_KEY=$OPENDART_API_KEY_INPUT" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |
@@ -60,21 +68,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: checkpoint
-          key: dart-checkpoint-${{ github.ref_name }}-${{ github.run_id }}
+          key: dart-checkpoint-fixed5000-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            dart-checkpoint-${{ github.ref_name }}-
+            dart-checkpoint-fixed5000-${{ github.ref_name }}-
+            dart-checkpoint-fixed5000-
             dart-checkpoint-
 
       - name: Smoke test CLI
-        env:
-          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
         run: |
           python -m src.main --help
           python -m src.main check-key
 
       - name: DART target finding fixed 5000
-        env:
-          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
         run: |
           python -m src.main find \
             --revenue-min 10000000000 \
