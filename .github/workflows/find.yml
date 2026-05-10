@@ -16,7 +16,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: dart-finder-${{ github.ref }}
+  group: dart-finder-fixed5000-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -37,9 +37,11 @@ jobs:
       - name: Validate repository layout
         run: |
           test -f requirements.txt || { echo 'requirements.txt 없음. repo root에 올려야 함'; exit 1; }
-          test -f src/main.py || { echo 'src/main.py 없음. repo root에 src 폴더가 있어야 함'; exit 1; }
+          test -f src/__init__.py || { echo 'src/__init__.py 없음'; exit 1; }
+          test -f src/config.py || { echo 'src/config.py 없음'; exit 1; }
+          test -f src/dart_client.py || { echo 'src/dart_client.py 없음'; exit 1; }
           test -f src/scoring.py || { echo 'src/scoring.py 없음'; exit 1; }
-          test -f .github/workflows/find.yml || { echo '.github/workflows/find.yml 없음'; exit 1; }
+          test -f src/main.py || { echo 'src/main.py 없음'; exit 1; }
 
       - name: Prepare OpenDART key
         env:
@@ -64,6 +66,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Static import and syntax check
+        run: |
+          python -m py_compile src/config.py src/dart_client.py src/scoring.py src/main.py
+          python - <<'PY'
+          from src.scoring import (
+              CompanyData,
+              assign_tier,
+              get_domain,
+              guess_emails,
+              passes_filter,
+              recommend_channel,
+              recommend_persona,
+              score_company,
+          )
+          from src.dart_client import DartClient
+          from src.config import settings
+          print("IMPORT_CHECK_OK")
+          print(assign_tier(1), assign_tier(500), assign_tier(5000), assign_tier(5001))
+          PY
+
       - name: Restore checkpoint cache
         uses: actions/cache@v4
         with:
@@ -72,11 +94,11 @@ jobs:
           restore-keys: |
             dart-checkpoint-fixed5000-${{ github.ref_name }}-
             dart-checkpoint-fixed5000-
-            dart-checkpoint-
 
       - name: Smoke test CLI
         run: |
           python -m src.main --help
+          python -m src.main self-test
           python -m src.main check-key
 
       - name: DART target finding fixed 5000
@@ -104,7 +126,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: targets-5000-${{ github.run_number }}
+          name: targets-fixed5000-${{ github.run_number }}
           path: |
             output/*.csv
             checkpoint/*.json
