@@ -3,23 +3,53 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import urlparse
 
-DIGITAL = {"58", "59", "60", "61", "62", "63", "70", "71", "72", "73", "82"}
-CONSERVATIVE = {"64", "65", "66", "84", "85", "86"}
+DIGITAL_INDUSTRY_PREFIXES = {"58", "59", "60", "61", "62", "63", "70", "71", "72", "73", "82"}
+CONSERVATIVE_INDUSTRY_PREFIXES = {"64", "65", "66", "84", "85", "86"}
 
-KOREA = [
+KOREA_REGION_KEYWORDS = [
     "서울", "경기", "인천", "부산", "대구", "광주", "대전", "울산", "세종",
     "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
 ]
 
-SURNAMES = {
-    "김": "kim", "이": "lee", "박": "park", "최": "choi", "정": "jung",
-    "강": "kang", "조": "cho", "윤": "yoon", "장": "jang", "임": "lim",
-    "한": "han", "오": "oh", "서": "seo", "신": "shin", "권": "kwon",
-    "황": "hwang", "안": "ahn", "송": "song", "전": "jeon", "홍": "hong",
-    "유": "yoo", "고": "ko", "문": "moon", "양": "yang", "손": "son",
-    "배": "bae", "백": "baek", "허": "huh", "남": "nam", "심": "shim",
-    "노": "no", "하": "ha", "구": "koo", "성": "sung", "차": "cha",
-    "주": "joo", "우": "woo", "민": "min",
+KOREAN_SURNAME_ROMANIZATION = {
+    "김": "kim",
+    "이": "lee",
+    "박": "park",
+    "최": "choi",
+    "정": "jung",
+    "강": "kang",
+    "조": "cho",
+    "윤": "yoon",
+    "장": "jang",
+    "임": "lim",
+    "한": "han",
+    "오": "oh",
+    "서": "seo",
+    "신": "shin",
+    "권": "kwon",
+    "황": "hwang",
+    "안": "ahn",
+    "송": "song",
+    "전": "jeon",
+    "홍": "hong",
+    "유": "yoo",
+    "고": "ko",
+    "문": "moon",
+    "양": "yang",
+    "손": "son",
+    "배": "bae",
+    "백": "baek",
+    "허": "huh",
+    "남": "nam",
+    "심": "shim",
+    "노": "no",
+    "하": "ha",
+    "구": "koo",
+    "성": "sung",
+    "차": "cha",
+    "주": "joo",
+    "우": "woo",
+    "민": "min",
 }
 
 
@@ -32,42 +62,64 @@ class CompanyData:
     industry: str = ""
     address: str = ""
     homepage: str = ""
-    revenue: int = None
-    revenue_prev: int = None
-    growth_rate: float = None
-    operating_profit: int = None
-    net_income: int = None
-    employees: int = None
+    revenue: int | None = None
+    revenue_prev: int | None = None
+    growth_rate: float | None = None
+    operating_profit: int | None = None
+    net_income: int | None = None
+    employees: int | None = None
     executives: list = field(default_factory=list)
     establish_date: str = ""
     recruit_count: int = 0
 
 
-def passes_filter(c, *, revenue_min, revenue_max, employees_min, employees_max) -> bool:
-    if c.revenue is None or not (revenue_min <= c.revenue <= revenue_max):
+def passes_filter(
+    company: CompanyData,
+    *,
+    revenue_min: int,
+    revenue_max: int,
+    employees_min: int,
+    employees_max: int,
+) -> bool:
+    if company.revenue is None:
         return False
-    if not c.employees or not (employees_min <= c.employees <= employees_max):
+
+    if not (revenue_min <= company.revenue <= revenue_max):
         return False
-    if not c.address or not any(k in c.address for k in KOREA):
+
+    if not company.employees:
         return False
+
+    if not (employees_min <= company.employees <= employees_max):
+        return False
+
+    if not company.address:
+        return False
+
+    if not any(keyword in company.address for keyword in KOREA_REGION_KEYWORDS):
+        return False
+
     return True
 
 
-def score_company(c) -> tuple:
-    breakdown = {}
-    breakdown["pen_age"] = _age(c.establish_date)
-    breakdown["pen_industry"] = 12 if any(c.industry.startswith(p) for p in DIGITAL) else 6
-    breakdown["pen_decision"] = _decision(c)
-    breakdown["pen_recruit"] = min(c.recruit_count, 5) if c.recruit_count else 0
-    breakdown["pen_penalty"] = -8 if any(c.industry.startswith(p) for p in CONSERVATIVE) else 0
-    breakdown["money_margin"] = _margin(c)
-    breakdown["money_growth"] = _growth(c.growth_rate)
-    breakdown["money_per_capita"] = _per_capita(c)
-    breakdown["money_scale"] = _scale(c.revenue)
-    return sum(breakdown.values()), breakdown
+def score_company(company: CompanyData) -> tuple[int, dict]:
+    breakdown = {
+        "pen_age": score_company_age(company.establish_date),
+        "pen_industry": score_industry(company.industry),
+        "pen_decision": score_decision_structure(company),
+        "pen_recruit": min(company.recruit_count, 5) if company.recruit_count else 0,
+        "pen_penalty": score_penalty(company.industry),
+        "money_margin": score_margin(company),
+        "money_growth": score_growth(company.growth_rate),
+        "money_per_capita": score_revenue_per_employee(company),
+        "money_scale": score_revenue_scale(company.revenue),
+    }
+
+    total = sum(breakdown.values())
+    return int(total), breakdown
 
 
-def _age(establish_date):
+def score_company_age(establish_date: str) -> int:
     if not establish_date:
         return 7
 
@@ -76,7 +128,8 @@ def _age(establish_date):
         return 7
 
     try:
-        age = datetime.now().year - int(digits[:4])
+        year = int(digits[:4])
+        age = datetime.now().year - year
     except ValueError:
         return 7
 
@@ -91,9 +144,23 @@ def _age(establish_date):
     return 3
 
 
-def _decision(c):
-    executive_count = len(c.executives)
-    employees = c.employees or 0
+def score_industry(industry_code: str) -> int:
+    industry_code = industry_code or ""
+    if any(industry_code.startswith(prefix) for prefix in DIGITAL_INDUSTRY_PREFIXES):
+        return 12
+    return 6
+
+
+def score_penalty(industry_code: str) -> int:
+    industry_code = industry_code or ""
+    if any(industry_code.startswith(prefix) for prefix in CONSERVATIVE_INDUSTRY_PREFIXES):
+        return -8
+    return 0
+
+
+def score_decision_structure(company: CompanyData) -> int:
+    executive_count = len(company.executives or [])
+    employees = company.employees or 0
     score = 0
 
     if 3 <= executive_count <= 7:
@@ -115,11 +182,11 @@ def _decision(c):
     return score
 
 
-def _margin(c):
-    if not c.revenue or not c.operating_profit or c.revenue <= 0:
+def score_margin(company: CompanyData) -> int:
+    if not company.revenue or not company.operating_profit or company.revenue <= 0:
         return 0
 
-    margin = c.operating_profit / c.revenue
+    margin = company.operating_profit / company.revenue
 
     if margin >= 0.20:
         return 18
@@ -136,82 +203,73 @@ def _margin(c):
     return 0
 
 
-def _growth(rate):
-    if rate is None:
+def score_growth(growth_rate: float | None) -> int:
+    if growth_rate is None:
         return 4
-    if rate >= 0.40:
+    if growth_rate >= 0.40:
         return 12
-    if rate >= 0.25:
+    if growth_rate >= 0.25:
         return 10
-    if rate >= 0.15:
+    if growth_rate >= 0.15:
         return 8
-    if rate >= 0.05:
+    if growth_rate >= 0.05:
         return 5
-    if rate >= -0.05:
+    if growth_rate >= -0.05:
         return 3
     return 0
 
 
-def _per_capita(c):
-    if not c.employees or not c.revenue or c.employees <= 0:
+def score_revenue_per_employee(company: CompanyData) -> int:
+    if not company.employees or not company.revenue or company.employees <= 0:
         return 0
 
-    per_capita = c.revenue / c.employees / 1e8
+    per_capita_eok = company.revenue / company.employees / 100_000_000
 
-    if per_capita >= 15:
+    if per_capita_eok >= 15:
         return 10
-    if per_capita >= 10:
+    if per_capita_eok >= 10:
         return 8
-    if per_capita >= 5:
+    if per_capita_eok >= 5:
         return 6
-    if per_capita >= 3:
+    if per_capita_eok >= 3:
         return 4
-    if per_capita >= 2:
+    if per_capita_eok >= 2:
         return 2
     return 1
 
 
-def _scale(revenue):
+def score_revenue_scale(revenue: int | None) -> int:
     if not revenue:
         return 0
 
-    eok = revenue / 1e8
+    revenue_eok = revenue / 100_000_000
 
-    if 200 <= eok <= 1000:
+    if 200 <= revenue_eok <= 1000:
         return 10
-    if 1000 < eok <= 3000:
+    if 1000 < revenue_eok <= 3000:
         return 8
-    if 100 <= eok < 200:
+    if 100 <= revenue_eok < 200:
         return 7
-    if 3000 < eok <= 5000:
+    if 3000 < revenue_eok <= 5000:
         return 5
-    if 50 <= eok < 100:
+    if 50 <= revenue_eok < 100:
         return 4
-    if eok > 5000:
+    if revenue_eok > 5000:
         return 2
     return 1
 
 
-def assign_tier(value: float | int) -> str:
-    """
-    순위 기준 tier.
-    main.py에서 rank를 넣는다.
-
-    S: 1~100
-    A: 101~1000
-    B: 1001~5000
-    C: 그 외
-    """
+def assign_tier(rank: int | float) -> str:
     try:
-        rank = int(value or 0)
+        rank_int = int(rank or 0)
     except Exception:
-        rank = 999999
+        rank_int = 999999
 
-    if rank <= 100:
+    if rank_int <= 100:
         return "S"
-    if rank <= 1000:
+    if rank_int <= 1000:
         return "A"
-    if rank <= 5000:
+    if rank_int <= 5000:
         return "B"
     return "C"
 
@@ -222,32 +280,46 @@ def recommend_channel(tier: str) -> str:
         "A": "LinkedIn + 이메일",
         "B": "이메일 자동화",
         "C": "예비",
-    }.get(tier, "")
+    }.get(tier, "예비")
 
 
-def recommend_persona(c) -> str:
+def recommend_persona(company: CompanyData) -> str:
     keywords = [
-        "경영지원", "운영", "총무", "경영기획", "기획실", "인사", "HR",
-        "CIO", "정보", "IT", "디지털",
+        "경영지원",
+        "운영",
+        "총무",
+        "경영기획",
+        "기획실",
+        "인사",
+        "HR",
+        "CIO",
+        "정보",
+        "IT",
+        "디지털",
     ]
 
-    for executive in c.executives:
-        combined = f"{executive.get('chrg_job', '') or ''} {executive.get('ofcps', '') or ''}"
+    for executive in company.executives or []:
+        name = executive.get("nm", "")
+        role = executive.get("chrg_job", "") or executive.get("ofcps", "")
+        combined = f"{role}"
+
         for keyword in keywords:
             if keyword in combined:
-                return f"{executive.get('nm', '')} ({executive.get('chrg_job', '') or executive.get('ofcps', '')})"
+                return f"{name} ({role})".strip()
 
-    if c.ceo_name:
-        return f"{c.ceo_name} (대표이사)"
+    if company.ceo_name:
+        return f"{company.ceo_name} (대표이사)"
 
-    if c.executives:
-        executive = c.executives[0]
-        return f"{executive.get('nm', '')} ({executive.get('ofcps', '') or executive.get('chrg_job', '')})"
+    if company.executives:
+        executive = company.executives[0]
+        name = executive.get("nm", "")
+        role = executive.get("ofcps", "") or executive.get("chrg_job", "")
+        return f"{name} ({role})".strip()
 
     return ""
 
 
-def get_domain(homepage: str):
+def get_domain(homepage: str) -> str | None:
     if not homepage:
         return None
 
@@ -259,78 +331,75 @@ def get_domain(homepage: str):
         netloc = urlparse(url).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]
-        return netloc if netloc and "." in netloc else None
+        if "." in netloc:
+            return netloc
     except Exception:
         return None
 
+    return None
 
-def guess_emails(c) -> list:
-    domain = get_domain(c.homepage)
+
+def guess_emails(company: CompanyData) -> list[str]:
+    domain = get_domain(company.homepage)
     if not domain:
         return []
 
-    patterns = {f"info@{domain}", f"contact@{domain}", f"sales@{domain}"}
-    names = [c.ceo_name] + [e.get("nm", "") for e in c.executives[:3]]
+    patterns = {
+        f"info@{domain}",
+        f"contact@{domain}",
+        f"sales@{domain}",
+    }
+
+    names = [company.ceo_name] + [executive.get("nm", "") for executive in (company.executives or [])[:3]]
 
     for name in names:
-        if not name or not (2 <= len(name) <= 4):
+        if not name:
             continue
+
+        name = name.strip()
+        if not (2 <= len(name) <= 4):
+            continue
+
         if not all("\uac00" <= ch <= "\ud7a3" for ch in name):
             continue
 
-        surname = SURNAMES.get(name[0])
-        if surname:
-            patterns.add(f"{surname}@{domain}")
+        romanized_surname = KOREAN_SURNAME_ROMANIZATION.get(name[0])
+        if romanized_surname:
+            patterns.add(f"{romanized_surname}@{domain}")
 
     return sorted(patterns)[:3]
 
-# ===== compatibility aliases for older main.py =====
-# Claude/old main.py may import these names. Keep them to prevent GitHub Actions import errors.
 
-def guess_email_patterns(c) -> list:
-    return guess_emails(c)
-
-
-def recommend_contact_person(c) -> str:
-    return recommend_persona(c)
-
-
-def recommend_target_person(c) -> str:
-    return recommend_persona(c)
-
-
-def recommend_person(c) -> str:
-    return recommend_persona(c)
-
-
-def recommend_outreach_channel(tier: str) -> str:
-    return recommend_channel(tier)
-
-
-def calculate_score(c) -> tuple:
-    return score_company(c)
-
-
-def compute_score(c) -> tuple:
-    return score_company(c)
-
-
-def score_target(c) -> tuple:
-    return score_company(c)
-
-
-def get_homepage_domain(homepage: str):
-    return get_domain(homepage)
-
-
-def extract_domain(homepage: str):
-    return get_domain(homepage)
-
-
-def tier_from_rank(value):
-    return assign_tier(value)
-
-
-def assign_rank_tier(value):
-    return assign_tier(value)
-# ===== /compatibility aliases =====
+def self_test_scoring() -> dict:
+    sample = CompanyData(
+        corp_name="테스트회사",
+        corp_code="00000000",
+        industry="620000",
+        address="서울특별시 강남구",
+        homepage="https://example.com",
+        revenue=30_000_000_000,
+        revenue_prev=25_000_000_000,
+        growth_rate=0.2,
+        operating_profit=3_000_000_000,
+        employees=120,
+        executives=[{"nm": "김철수", "ofcps": "대표이사", "chrg_job": "경영"}],
+        establish_date="20180101",
+    )
+    total, breakdown = score_company(sample)
+    return {
+        "filter": passes_filter(
+            sample,
+            revenue_min=10_000_000_000,
+            revenue_max=500_000_000_000,
+            employees_min=30,
+            employees_max=800,
+        ),
+        "score": total,
+        "breakdown": breakdown,
+        "tier_1": assign_tier(1),
+        "tier_500": assign_tier(500),
+        "tier_5000": assign_tier(5000),
+        "domain": get_domain(sample.homepage),
+        "emails": guess_emails(sample),
+        "persona": recommend_persona(sample),
+    }
