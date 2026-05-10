@@ -1,0 +1,41 @@
+name: DART Finder
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * 0'
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: DART 타겟 발굴
+        env:
+          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+        run: |
+          python -m src.main find \
+            --revenue-min 10000000000 \
+            --revenue-max 500000000000 \
+            --employees-min 30 \
+            --employees-max 800 \
+            --top 5000 \
+            --include-unlisted \
+            --min-score 25
+
+      - name: 결과 저장
+        uses: actions/upload-artifact@v4
+        with:
+          name: targets-${{ github.run_number }}
+          path: output/*.csv
+          retention-days: 90
