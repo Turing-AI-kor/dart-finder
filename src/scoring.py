@@ -283,3 +283,54 @@ def guess_emails(c) -> list:
             patterns.add(f"{surname}@{domain}")
 
     return sorted(patterns)[:3]
+
+# ===== compatibility aliases for older main.py =====
+# Claude/old main.py may import these names. Keep them to prevent GitHub Actions import errors.
+
+def guess_email_patterns(c) -> list:
+    return guess_emails(c)
+
+
+def recommend_contact_person(c) -> str:
+    return recommend_persona(c)
+
+
+def recommend_target_person(c) -> str:
+    return recommend_persona(c)
+
+
+def recommend_person(c) -> str:
+    return recommend_persona(c)
+
+
+def recommend_outreach_channel(tier: str) -> str:
+    return recommend_channel(tier)
+
+
+def calculate_score(c) -> tuple:
+    return score_company(c)
+
+
+def compute_score(c) -> tuple:
+    return score_company(c)
+
+
+def score_target(c) -> tuple:
+    return score_company(c)
+
+
+def get_homepage_domain(homepage: str):
+    return get_domain(homepage)
+
+
+def extract_domain(homepage: str):
+    return get_domain(homepage)
+
+
+def tier_from_rank(value):
+    return assign_tier(value)
+
+
+def assign_rank_tier(value):
+    return assign_tier(value)
+# ===== /compatibility aliases =====
